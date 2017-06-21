@@ -1,5 +1,5 @@
 # Fine-Dust-Prediction
-Prediction of daily average amount of fine dust by tensorflow.
+Prediction of the daily average amount of fine dust by tensorflow.
 
 <img src="md_image/network_model.png" width="80%">
 
