@@ -1,8 +1,6 @@
 # Fine-Dust-Prediction
 Prediction of the daily average amount of fine dust by tensorflow.
 
-<img src="md_image/network_model.png" width="80%">
-
 ## Pre-processing
 Pre-processing the daily average amount of the fine dust(pm10) to bundle it in 7 days.
 
@@ -12,15 +10,13 @@ For the convolution layer, the amount of fine dust for each region is mapped to 
 
 The data was extracted from the csv file [Seoul Daily Average Air Pollution Degree Information](http://data.seoul.go.kr/openinf/sheetview.jsp?infId=OA-2218&tMenu=11) provided by the Seoul Open Data Plaza.
 
-## CRNN Model
+## ConvLSTM Model
 
-Input [None, 7, 9, 8] matrix, which represents 7days of the fine-dust data.
+[Convolutional LSTM](https://arxiv.org/abs/1506.04214) is similar as LSTM, but it calculate hidden states by convolution not fully-connected.
 
-Convolution each layer (per day) separately with 3x3 sized, 1x16, 16x32, 32x64 filter.
+Input 5D Tensor (input_dim, batch_size, height, width, channel) to the ConvLSTM Cell and it returns last hidden unit (batch_size, height, width, 32).
 
-Flatten each layer and pass it to the recurrent unit.
-
-Calculate estimates of the amount of fine dust on next day via three fully connected layer (2048, 512, 25).
+Flatten it by 1x1 convolution and calculate MSE loss with the next day's fine dust.
 
 ## Conclusion
 
