@@ -1,5 +1,5 @@
 # Fine-Dust-Prediction
-Prediction of the daily average amount of fine dust by tensorflow.
+Prediction of the daily average amount of the fine dust by tensorflow.
 
 ## Pre-processing
 Pre-processing the daily average amount of the fine dust(pm10) to bundle it in 7 days.
@@ -14,9 +14,11 @@ The data was extracted from the csv file [Seoul Daily Average Air Pollution Degr
 
 [Convolutional LSTM](https://arxiv.org/abs/1506.04214) is similar as LSTM, but it calculate hidden states by convolution not fully-connected.
 
-Input 5D Tensor (input_dim, batch_size, height, width, channel) to the ConvLSTM Cell and it returns last hidden unit (batch_size, height, width, 32).
+Feed 5D Tensor (time_dim, batch_size, height, width, channel) to the ConvLSTM Cell and it returns hidden unit and state.
 
-Flatten it by 1x1 convolution and calculate MSE loss with the next day's fine dust.
+There is [prediction](https://github.com/revsic/Fine-Dust-Prediction/blob/master/Fine-Dust-Prediction.ipynb) and [forecasting](https://github.com/revsic/Fine-Dust-Prediction/blob/master/Fine-Dust-Forecaster.ipynb) models. Prediction model flatten an output of the last ConvLSTM Cell by 1x1 convolution and calculate MSE loss with the next day's fine dust.
+
+Forecasting model is the Stacked ConvLSTM Encoder-Decoder model. Stacked encoder summary the sequential data to the fixed-length vector and it is feeded to an initial state of the decoder model. Stacked decoder model generate stacked sequential data and flatten it by 1x1 convolution. It produces 7 days prediction.
 
 ## Conclusion
 
@@ -24,8 +26,10 @@ Training it and model was converged.
 
 <img src="md_image/training_graph.png" width="40%">
 
-Unfortunately, learning did not work out better than I thought.
-
 In addition to the fine-dust, the accuracy can be improved by adding wind direction or date information.
 
+*Prediction* <br>
 <img src="md_image/prediction.png" width="40%">
+
+*Forecaster* <br>
+<img src="md_image/forecasting.png" width="40%">
