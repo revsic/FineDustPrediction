@@ -1,5 +1,4 @@
 import json
-import numpy as np
 import tensorflow as tf
 
 class ConvLSTMCell(tf.nn.rnn_cell.RNNCell):
@@ -32,7 +31,7 @@ class ConvLSTMCell(tf.nn.rnn_cell.RNNCell):
     'Convolutional LSTM Network: A Machine Learning Approach for Precipitation Nowcasting'. 2015.
 
     Recurrent dropout is base on:
-    
+
         https://arxiv.org/pdf/1603.05118
 
     Stanislau Semeniuta, Aliaksei Severyn, Erhardt Barth
@@ -55,21 +54,21 @@ class ConvLSTMCell(tf.nn.rnn_cell.RNNCell):
         '''Initialize the parameters for a ConvLSTM Cell.
 
         Args:
-            shape: list of 2 integers, specifying the height and width 
+            shape: list of 2 integers, specifying the height and width
                 of the input tensor.
-            kernel: list of 2 integers, specifying the height and width 
+            kernel: list of 2 integers, specifying the height and width
                 of the convolutional window.
             depth: Integer, the dimensionality of the output space.
             use_peepholes: Boolean, set True to enable diagonal/peephole connections.
-            cell_clip: Float, if provided the cell state is clipped by this value 
+            cell_clip: Float, if provided the cell state is clipped by this value
                 prior to the cell output activation.
             initializer: The initializer to use for the weights.
             forget_bias: Biases of the forget gate are initialized by default to 1
                 in order to reduce the scale of forgetting at the beginning of the training.
             activation: Activation function of the inner states. Default: `tanh`.
-            normalize: Normalize function, if provided inner states is normalizeed 
+            normalize: Normalize function, if provided inner states is normalizeed
                 by this function.
-            dropout: Float, if provided dropout is applied to inner states 
+            dropout: Float, if provided dropout is applied to inner states
                 with keep probability in this value.
             reuse: Boolean, whether to reuse variables in an existing scope.
         '''
@@ -113,8 +112,8 @@ class ConvLSTMCell(tf.nn.rnn_cell.RNNCell):
         Returns:
             A tuple containing:
 
-            - A '4-D, (batch, height, width, depth)', Tensor representing 
-                the output of the ConvLSTM after reading `inputs` when previous 
+            - A '4-D, (batch, height, width, depth)', Tensor representing
+                the output of the ConvLSTM after reading `inputs` when previous
                 state was `state`.
                 Here height, width is:
                     shape[0] and shape[1].
@@ -229,7 +228,7 @@ class Predicator(object):
 
         self.optimize = tf.train.AdamOptimizer(self._learning_rate, self._beta1).minimize(self.loss)
         self.summary = tf.summary.scalar('Metric', self.metric)
-        self._ckpt = tf.train.Saver()
+        self.ckpt = tf.train.Saver()
 
     def train(self, sess, x, y):
         sess.run(self.optimize, feed_dict={self.plc_x: x, self.plc_y: y})
@@ -238,7 +237,7 @@ class Predicator(object):
         return sess.run(obj, feed_dict={self.plc_x: x, self.plc_y: y})
 
     def dump(self, sess, path):
-        self._ckpt.save(sess, path + '.ckpt')
+        self.ckpt.save(sess, path + '.ckpt')
 
         with open(path + '.json', 'w') as f:
             dump = json.dumps(
@@ -269,19 +268,21 @@ class Predicator(object):
             param['learning_rate'],
             param['beta1']
         )
-        model._ckpt.restore(sess, path + '.ckpt')
+        model.ckpt.restore(sess, path + '.ckpt')
 
         return model
 
     def _get_model(self):
         assert len(self._kernels) == len(self._depths), 'Number of kernels and depths must be same.'
-        
+
+        # self.plc_x.shape == [BATCH_SIZE, self._num_time, self._matrix_shape[0], self._matrix_shape[1]]
         shape = [-1, self._matrix_shape[0], self._matrix_shape[1], 1]
-        inputs = tf.transpose(tf.reshape(self.plc_x, shape), [1, 0, 2, 3, 4])
-        
+        inputs = tf.transpose(tf.reshape(self.plc_x, shape), [1, 0, 2, 3, 4]) # time major
+
         states = []
         hiddens = [inputs]
 
+        # Stacked ConvLSTM Encoder
         for kernel, depth in zip(self._kernels, self._depths):
             cell = ConvLSTMCell(self._matrix_shape, kernel, depth)
             h, s = tf.nn.dynamic_rnn(cell, hiddens[-1], self._num_time, time_major=True)
@@ -290,16 +291,32 @@ class Predicator(object):
             hiddens.append(h)
 
         if self._out_time == 1:
+            # Predict next day
             concat = tf.concat([h[-1] for h in hiddens[1:]], axis=-1)
-            flatten = tf.layers.conv2d(concat, 1, (1, 1), (1, 1))
+            flatten = tf.layers.conv2d(concat, 1, (1, 1), (1, 1), padding='SAME')
 
             result = tf.reshape(flatten, [-1] + self._matrix_shape)
         else:
-            hiddens = [tf.zeros((tf.shape(self.plc_x)[0], ))]
+            # Forecast after `self._out_time` days
+            hiddens = [tf.zeros_like(inputs)]
+
+            # Stacked ConvLSTM Decoder
             for kernel, depth, state in zip(self._kernels, self._depths, states):
                 cell = ConvLSTMCell(self._matrix_shape, kernel, depth)
-                h, s = tf.nn.dynamic_rnn(cell, hidens[-1], self._out_time, initial_state=state, time_major=True)
+                h, _ = tf.nn.dynamic_rnn(cell, hiddens[-1], self._out_time, initial_state=state, time_major=True)
 
+                hiddens.append(h)
+
+            concat = tf.concat(hiddens[1:], axis=-1)
+            shape = tf.shape(concat)
+
+            reduced_shape = (tf.reduce_prod(shape[:2]), self._matrix_shape[0], self._matrix_shape[1], shape[-1])
+            reshaped = tf.reshape(concat, reduced_shape)
+
+            flatten = tf.layers.conv2d(reshaped, 1, (1, 1), (1, 1), padding='SAME')
+            recover = tf.reshape(flatten, shape[:-1])
+
+            result = recover
 
         return result
 
@@ -308,9 +325,6 @@ class Predicator(object):
 
     def _get_metric(self):
         return self.loss
-
-    def _decode_loop(self):
-        pass
 
 
 class Batch(object):
