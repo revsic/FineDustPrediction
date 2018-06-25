@@ -1,8 +1,9 @@
 import json
 import tensorflow as tf
 
+
 class ConvLSTMCell(tf.nn.rnn_cell.RNNCell):
-    '''Convolutional LSTM (Long short-term memory unit) recurrent network cell.
+    """Convolutional LSTM (Long short-term memory unit) recurrent network cell.
 
     The class uses optional peep-hole connections, optional cell-clipping,
     optional normalization layer, and an optional recurrent dropout layer.
@@ -38,7 +39,7 @@ class ConvLSTMCell(tf.nn.rnn_cell.RNNCell):
     'Recurrent Dropout without Memory Loss'. 2016.
 
     Normalization layer is applied before interal nonlinearities.
-    '''
+    """
     def __init__(self,
                  shape,
                  kernel,
@@ -51,7 +52,7 @@ class ConvLSTMCell(tf.nn.rnn_cell.RNNCell):
                  normalize=None,
                  dropout=None,
                  reuse=None):
-        '''Initialize the parameters for a ConvLSTM Cell.
+        """Initialize the parameters for a ConvLSTM Cell.
 
         Args:
             shape: list of 2 integers, specifying the height and width
@@ -71,7 +72,7 @@ class ConvLSTMCell(tf.nn.rnn_cell.RNNCell):
             dropout: Float, if provided dropout is applied to inner states
                 with keep probability in this value.
             reuse: Boolean, whether to reuse variables in an existing scope.
-        '''
+        """
         super(ConvLSTMCell, self).__init__(_reuse=reuse)
 
         tf_shape = tf.TensorShape(shape + [depth])
@@ -103,7 +104,7 @@ class ConvLSTMCell(tf.nn.rnn_cell.RNNCell):
         return self._output_size
 
     def call(self, inputs, state):
-        '''Run one step of ConvLSTM.
+        """Run one step of ConvLSTM.
 
         Args:
             inputs: input Tensor, 4D, (batch, shape[0], shape[1], depth)
@@ -119,7 +120,7 @@ class ConvLSTMCell(tf.nn.rnn_cell.RNNCell):
                     shape[0] and shape[1].
             - Tensor(s) representing the new state of ConvLSTM after reading `inputs` when
                 the previous state was `state`. Same type and shape(s) as `state`.
-        '''
+        """
         dtype = inputs.dtype
         input_size = inputs.get_shape().with_rank(4)[3]
         if input_size.value is None:
@@ -178,7 +179,7 @@ class ConvLSTMCell(tf.nn.rnn_cell.RNNCell):
 
 
 class Predicator(object):
-    ''' Predict daily average amount of fine dust.
+    """Predict daily average amount of fine dust.
 
     Attributes:
         matrix_shape: list of 2 integers, specifying the height and width of input matrix.
@@ -195,9 +196,9 @@ class Predicator(object):
         metric: tf.Tensor, metric for evaluating model.
         optimize: tf.Tensor, optimize object.
         summary: tf.Tensor, tensor summary of the metric.
-    '''
+    """
     def __init__(self, matrix_shape, num_time, out_time, kernels, depths, learning_rate, beta1):
-        ''' Initializer
+        """Initializer
         Args:
             matrix_shape: list of 2 integers, specifying the height and width of input matrix.
             num_time: Integer, the number of time series as an input.
@@ -206,7 +207,7 @@ class Predicator(object):
             depths: list of n-integers, specifying the depth of the ConvLSTM Cells.
             learning_rate: Float, learning rate in Adam for optimizing loss function.
             beta1: Float, beta1 value in Adam for optimizing loss function.
-        '''
+        """
         self._matrix_shape = matrix_shape
         self._num_time = num_time
         self._out_time = out_time
@@ -236,8 +237,8 @@ class Predicator(object):
     def inference(self, sess, obj, x, y):
         return sess.run(obj, feed_dict={self.plc_x: x, self.plc_y: y})
 
-    def dump(self, sess, path):
-        self.ckpt.save(sess, path + '.ckpt')
+    def dump(self, sess, path, global_step=None):
+        self.ckpt.save(sess, path + '.ckpt', global_step)
 
         with open(path + '.json', 'w') as f:
             dump = json.dumps(
@@ -255,7 +256,7 @@ class Predicator(object):
             f.write(dump)
 
     @classmethod
-    def load(cls, sess, path):
+    def load(cls, sess, path, global_step=None):
         with open(path + '.json') as f:
             param = json.loads(f.read())
 
@@ -268,7 +269,11 @@ class Predicator(object):
             param['learning_rate'],
             param['beta1']
         )
-        model.ckpt.restore(sess, path + '.ckpt')
+
+        if global_step:
+            model.ckpt.restore(sess, '{}.ckpt-{}'.format(path, global_step))
+        else:
+            model.ckpt.restore(sess, path + '.ckpt')
 
         return model
 
@@ -276,16 +281,17 @@ class Predicator(object):
         assert len(self._kernels) == len(self._depths), 'Number of kernels and depths must be same.'
 
         # self.plc_x.shape == [BATCH_SIZE, self._num_time, self._matrix_shape[0], self._matrix_shape[1]]
-        shape = [-1, self._matrix_shape[0], self._matrix_shape[1], 1]
-        inputs = tf.transpose(tf.reshape(self.plc_x, shape), [1, 0, 2, 3, 4]) # time major
+        shape = [-1, self._num_time, self._matrix_shape[0], self._matrix_shape[1], 1]
+        inputs = tf.transpose(tf.reshape(self.plc_x, shape), [1, 0, 2, 3, 4])
 
         states = []
         hiddens = [inputs]
 
         # Stacked ConvLSTM Encoder
-        for kernel, depth in zip(self._kernels, self._depths):
-            cell = ConvLSTMCell(self._matrix_shape, kernel, depth)
-            h, s = tf.nn.dynamic_rnn(cell, hiddens[-1], self._num_time, time_major=True)
+        for i, (kernel, depth) in enumerate(zip(self._kernels, self._depths)):
+            with tf.variable_scope('{}th_enc'.format(i)):
+                cell = ConvLSTMCell(self._matrix_shape, kernel, depth)
+                h, s = tf.nn.dynamic_rnn(cell, hiddens[-1], dtype=tf.float32, time_major=True)
 
             states.append(s)
             hiddens.append(h)
@@ -298,23 +304,27 @@ class Predicator(object):
             result = tf.reshape(flatten, [-1] + self._matrix_shape)
         else:
             # Forecast after `self._out_time` days
-            hiddens = [tf.zeros_like(inputs)]
+            initial_shape = tf.concat([[self._out_time], tf.shape(inputs)[1:]], axis=0)
+            hiddens = [tf.zeros(initial_shape)]
 
             # Stacked ConvLSTM Decoder
-            for kernel, depth, state in zip(self._kernels, self._depths, states):
-                cell = ConvLSTMCell(self._matrix_shape, kernel, depth)
-                h, _ = tf.nn.dynamic_rnn(cell, hiddens[-1], self._out_time, initial_state=state, time_major=True)
+            for i, (kernel, depth, state) in enumerate(zip(self._kernels, self._depths, states)):
+                with tf.variable_scope('{}th_dec'.format(i)):
+                    cell = ConvLSTMCell(self._matrix_shape, kernel, depth)
+                    h, _ = tf.nn.dynamic_rnn(cell, hiddens[-1], initial_state=state, time_major=True)
 
                 hiddens.append(h)
 
             concat = tf.concat(hiddens[1:], axis=-1)
-            shape = tf.shape(concat)
+            concat_t = tf.transpose(concat, [1, 0, 2, 3, 4])
 
-            reduced_shape = (tf.reduce_prod(shape[:2]), self._matrix_shape[0], self._matrix_shape[1], shape[-1])
-            reshaped = tf.reshape(concat, reduced_shape)
+            shape = concat_t.shape.as_list()
+            out_shape = [-1, self._out_time] + self._matrix_shape
+
+            reshaped = tf.reshape(concat_t, [-1] + shape[2:])
 
             flatten = tf.layers.conv2d(reshaped, 1, (1, 1), (1, 1), padding='SAME')
-            recover = tf.reshape(flatten, shape[:-1])
+            recover = tf.reshape(flatten, out_shape)
 
             result = recover
 
