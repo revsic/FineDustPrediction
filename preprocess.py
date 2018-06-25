@@ -127,11 +127,11 @@ def create_dataset(csv_name='./MonthlyAverageAirPollutionInSeoul.csv',
 
     train_size = int(len(data_set) * train_rate)
     train_set = data_set[:train_size]
-    train_sampled = list(map(lambda x: x[0], train_set))
-    train_result = list(map(lambda x: x[1], train_set))
+    train_x = list(map(lambda x: x[0], train_set))
+    train_y = list(map(lambda x: x[1], train_set))
 
-    test_set = data_set[-train_size:]
-    test_sampled = list(map(lambda x: x[0], test_set))
-    test_result = list(map(lambda x: x[1], test_set))
+    test_set = data_set[train_size:]
+    test_x = list(map(lambda x: x[0], test_set))
+    test_y = list(map(lambda x: x[1], test_set))
 
-    return (train_sampled, train_result), (test_sampled, test_result)
+    return (train_x, train_y), (test_x, test_y)
